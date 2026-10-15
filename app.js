@@ -7,54 +7,48 @@ document.addEventListener("DOMContentLoaded", () => {
     imageFile: null,
     imageUrl: null,
     rotation: 0,
+    ocrWorker: null,
+    ocrWorkerPromise: null,
     processing: false,
     translating: false
   };
 
-  // ------------------------------
+  // --------------------------------------------------
   // 1. NAVIGATION
-  // ------------------------------
+  // --------------------------------------------------
 
   const navButtons = document.querySelectorAll(".nav-btn");
   const toolViews = document.querySelectorAll(".tool-view");
 
   function showView(viewId) {
     const target = $(viewId);
-
-    if (!target) {
-      console.error("Tool view not found:", viewId);
-      return;
-    }
+    if (!target) return;
 
     toolViews.forEach((view) => {
-      const isActive = view.id === viewId;
-
-      view.hidden = !isActive;
-      view.classList.toggle("active", isActive);
+      const active = view.id === viewId;
+      view.hidden = !active;
+      view.classList.toggle("active", active);
     });
 
     navButtons.forEach((button) => {
-      const isActive = button.dataset.view === viewId;
-
-      button.classList.toggle("active", isActive);
-      button.setAttribute("aria-pressed", String(isActive));
+      const active = button.dataset.view === viewId;
+      button.classList.toggle("active", active);
+      button.setAttribute("aria-pressed", String(active));
     });
 
     window.scrollTo({
-      top: Math.max(0, target.getBoundingClientRect().top + window.scrollY - 95),
+      top: Math.max(0, target.getBoundingClientRect().top + window.scrollY - 85),
       behavior: "smooth"
     });
   }
 
   navButtons.forEach((button) => {
-    button.addEventListener("click", () => {
-      showView(button.dataset.view);
-    });
+    button.addEventListener("click", () => showView(button.dataset.view));
   });
 
-  // ------------------------------
-  // 2. NOTIFICATIONS
-  // ------------------------------
+  // --------------------------------------------------
+  // 2. NOTIFICATIONS AND PROGRESS
+  // --------------------------------------------------
 
   function showNotice(id, message, type = "") {
     const box = $(id);
@@ -63,9 +57,7 @@ document.addEventListener("DOMContentLoaded", () => {
     box.textContent = message;
     box.className = "notice show";
 
-    if (type) {
-      box.classList.add(type);
-    }
+    if (type) box.classList.add(type);
   }
 
   function hideNotice(id) {
@@ -76,32 +68,25 @@ document.addEventListener("DOMContentLoaded", () => {
     box.className = "notice";
   }
 
-  // ------------------------------
-  // 3. IMAGE UPLOAD
-  // ------------------------------
+  function setProgress(barId, statusId, percent, message) {
+    const bar = $(barId);
+    const status = $(statusId);
+
+    if (bar) {
+      bar.style.width = `${Math.max(0, Math.min(100, percent))}%`;
+    }
+
+    if (status) status.textContent = message;
+  }
+
+  // --------------------------------------------------
+  // 3. IMAGE UPLOAD AND PREVIEW
+  // --------------------------------------------------
 
   const imageInput = $("image-input");
   const uploadZone = $("upload-zone");
-  const chooseImageBtn = $("choose-image-btn");
-  const cameraBtn = $("camera-btn");
-  const rotateBtn = $("rotate-btn");
-  const clearImageBtn = $("clear-image-btn");
-  const extractTextBtn = $("extract-text-btn");
   const imagePreview = $("image-preview");
-  const ocrStatus = $("ocr-status");
-  const ocrProgressBar = $("ocr-progress-bar");
   const ocrResult = $("ocr-result");
-
-  function setOcrStatus(message, percent = 0) {
-    if (ocrStatus) {
-      ocrStatus.textContent = message;
-    }
-
-    if (ocrProgressBar) {
-      const safePercent = Math.min(100, Math.max(0, Number(percent) || 0));
-      ocrProgressBar.style.width = safePercent + "%";
-    }
-  }
 
   function releaseImageUrl() {
     if (state.imageUrl) {
@@ -124,32 +109,35 @@ document.addEventListener("DOMContentLoaded", () => {
       const empty = document.createElement("div");
       empty.className = "empty-state";
       empty.textContent = "Your image preview will appear here.";
-
       imagePreview.appendChild(empty);
     }
 
-    if (rotateBtn) rotateBtn.disabled = true;
-    if (clearImageBtn) clearImageBtn.disabled = true;
-    if (extractTextBtn) extractTextBtn.disabled = true;
+    $("rotate-btn").disabled = true;
+    $("clear-image-btn").disabled = true;
+    $("extract-text-btn").disabled = true;
 
-    setOcrStatus("Waiting for an image.", 0);
+    setProgress(
+      "ocr-progress-bar",
+      "ocr-status",
+      0,
+      "Waiting for an image."
+    );
+
     hideNotice("ocr-notice");
   }
 
   function loadImageFile(file) {
     if (!file) return;
 
-    if (!file.type || !file.type.startsWith("image/")) {
-      showNotice("ocr-notice", "Please select a valid image file.", "error");
+    if (!file.type.startsWith("image/")) {
+      showNotice("ocr-notice", "Please select a valid image.", "error");
       return;
     }
 
-    const maxSize = 20 * 1024 * 1024;
-
-    if (file.size > maxSize) {
+    if (file.size > 20 * 1024 * 1024) {
       showNotice(
         "ocr-notice",
-        "This image is larger than 20 MB. Please choose a smaller image for faster processing.",
+        "Image is larger than 20 MB. Choose a smaller image.",
         "error"
       );
       return;
@@ -164,106 +152,275 @@ document.addEventListener("DOMContentLoaded", () => {
     const image = document.createElement("img");
     image.alt = "Uploaded image preview";
     image.src = state.imageUrl;
-    image.style.transform = "rotate(0deg)";
 
     image.addEventListener("load", () => {
-      if (imagePreview) {
-        imagePreview.replaceChildren(image);
-      }
+      imagePreview.replaceChildren(image);
 
-      if (rotateBtn) rotateBtn.disabled = false;
-      if (clearImageBtn) clearImageBtn.disabled = false;
-      if (extractTextBtn) extractTextBtn.disabled = false;
+      $("rotate-btn").disabled = false;
+      $("clear-image-btn").disabled = false;
+      $("extract-text-btn").disabled = false;
 
-      setOcrStatus("Image ready. Click Extract Text to continue.", 0);
+      setProgress(
+        "ocr-progress-bar",
+        "ocr-status",
+        0,
+        "Image ready. Click Extract Text."
+      );
+
       hideNotice("ocr-notice");
     }, { once: true });
 
     image.addEventListener("error", () => {
-      showNotice("ocr-notice", "The image could not be loaded. Please try another image.", "error");
       resetImage();
+      showNotice(
+        "ocr-notice",
+        "Could not open this image. Please try another one.",
+        "error"
+      );
     }, { once: true });
   }
 
-  if (chooseImageBtn && imageInput) {
-    chooseImageBtn.addEventListener("click", () => {
-      imageInput.click();
-    });
-  }
+  $("choose-image-btn").addEventListener("click", () => {
+    imageInput.removeAttribute("capture");
+    imageInput.click();
+  });
 
-  if (cameraBtn && imageInput) {
-    cameraBtn.addEventListener("click", () => {
-      imageInput.setAttribute("accept", "image/*");
-      imageInput.setAttribute("capture", "environment");
-      imageInput.click();
-    });
-  }
+  $("camera-btn").addEventListener("click", () => {
+    imageInput.setAttribute("capture", "environment");
+    imageInput.click();
+  });
 
-  if (imageInput) {
-    imageInput.addEventListener("change", (event) => {
-      const file = event.target.files && event.target.files[0];
-      loadImageFile(file);
-    });
-  }
+  imageInput.addEventListener("change", (event) => {
+    loadImageFile(event.target.files?.[0]);
+  });
 
-  if (uploadZone) {
-    ["dragenter", "dragover"].forEach((eventName) => {
-      uploadZone.addEventListener(eventName, (event) => {
-        event.preventDefault();
-        uploadZone.classList.add("dragover");
+  ["dragenter", "dragover"].forEach((eventName) => {
+    uploadZone.addEventListener(eventName, (event) => {
+      event.preventDefault();
+      uploadZone.classList.add("dragover");
+    });
+  });
+
+  ["dragleave", "drop"].forEach((eventName) => {
+    uploadZone.addEventListener(eventName, (event) => {
+      event.preventDefault();
+      uploadZone.classList.remove("dragover");
+    });
+  });
+
+  uploadZone.addEventListener("drop", (event) => {
+    loadImageFile(event.dataTransfer?.files?.[0]);
+  });
+
+  $("rotate-btn").addEventListener("click", () => {
+    const image = imagePreview.querySelector("img");
+    if (!image) return;
+
+    state.rotation = (state.rotation + 90) % 360;
+    image.style.transform = `rotate(${state.rotation}deg)`;
+  });
+
+  $("clear-image-btn").addEventListener("click", resetImage);
+
+  // --------------------------------------------------
+  // 4. OCR WORKER — REUSE FOR BETTER PERFORMANCE
+  // --------------------------------------------------
+
+  async function getOcrWorker() {
+    if (state.ocrWorker) return state.ocrWorker;
+    if (state.ocrWorkerPromise) return state.ocrWorkerPromise;
+
+    if (!window.Tesseract || !window.Tesseract.createWorker) {
+      throw new Error(
+        "OCR library did not load. Check your internet connection and reload the website."
+      );
+    }
+
+    state.ocrWorkerPromise = (async () => {
+      const worker = await Tesseract.createWorker("eng", 1, {
+        logger: (info) => {
+          if (info.status === "recognizing text" && typeof info.progress === "number") {
+            const percent = Math.round(info.progress * 100);
+
+            setProgress(
+              "ocr-progress-bar",
+              "ocr-status",
+              percent,
+              `Recognizing text: ${percent}%`
+            );
+          } else if (info.status) {
+            setProgress(
+              "ocr-progress-bar",
+              "ocr-status",
+              5,
+              `Preparing OCR: ${info.status}`
+            );
+          }
+        }
       });
-    });
 
-    ["dragleave", "drop"].forEach((eventName) => {
-      uploadZone.addEventListener(eventName, (event) => {
-        event.preventDefault();
-        uploadZone.classList.remove("dragover");
-      });
-    });
+      state.ocrWorker = worker;
+      return worker;
+    })();
 
-    uploadZone.addEventListener("drop", (event) => {
-      const file = event.dataTransfer?.files?.[0];
-      if (file) loadImageFile(file);
+    try {
+      return await state.ocrWorkerPromise;
+    } finally {
+      state.ocrWorkerPromise = null;
+    }
+  }
+
+  function createOcrImage() {
+    return new Promise((resolve, reject) => {
+      const original = new Image();
+
+      original.onload = () => {
+        try {
+          const naturalWidth = original.naturalWidth;
+          const naturalHeight = original.naturalHeight;
+
+          if (!naturalWidth || !naturalHeight) {
+            reject(new Error("Image dimensions could not be read."));
+            return;
+          }
+
+          // Limit very large images to reduce memory use.
+          const maxDimension = 2200;
+          const scale = Math.min(
+            1,
+            maxDimension / Math.max(naturalWidth, naturalHeight)
+          );
+
+          const width = Math.max(1, Math.round(naturalWidth * scale));
+          const height = Math.max(1, Math.round(naturalHeight * scale));
+
+          const canvas = document.createElement("canvas");
+
+          if (state.rotation % 180 === 90) {
+            canvas.width = height;
+            canvas.height = width;
+          } else {
+            canvas.width = width;
+            canvas.height = height;
+          }
+
+          const context = canvas.getContext("2d", { willReadFrequently: true });
+
+          if (!context) {
+            reject(new Error("Your browser could not prepare the image."));
+            return;
+          }
+
+          context.save();
+          context.translate(canvas.width / 2, canvas.height / 2);
+          context.rotate((state.rotation * Math.PI) / 180);
+          context.drawImage(original, -width / 2, -height / 2, width, height);
+          context.restore();
+
+          resolve(canvas);
+        } catch (error) {
+          reject(error);
+        }
+      };
+
+      original.onerror = () => {
+        reject(new Error("Could not read the selected image."));
+      };
+
+      original.src = state.imageUrl;
     });
   }
 
-  if (rotateBtn) {
-    rotateBtn.addEventListener("click", () => {
-      const image = imagePreview?.querySelector("img");
-      if (!image) return;
+  $("extract-text-btn").addEventListener("click", async () => {
+    if (state.processing) return;
 
-      state.rotation = (state.rotation + 90) % 360;
-      image.style.transform = `rotate(${state.rotation}deg)`;
-    });
-  }
+    if (!state.imageFile) {
+      showNotice("ocr-notice", "Upload an image first.", "error");
+      return;
+    }
 
-  if (clearImageBtn) {
-    clearImageBtn.addEventListener("click", resetImage);
-  }
+    state.processing = true;
+    $("extract-text-btn").disabled = true;
 
-  // ------------------------------
-  // 4. CHARACTER COUNTS
-  // ------------------------------
+    setProgress(
+      "ocr-progress-bar",
+      "ocr-status",
+      2,
+      "Preparing your image..."
+    );
 
-  function updateCharacterCount(textareaId, outputId) {
-    const textarea = $(textareaId);
-    const output = $(outputId);
+    hideNotice("ocr-notice");
 
-    if (!textarea || !output) return;
+    try {
+      const canvas = await createOcrImage();
 
-    const count = textarea.value.length;
-    output.textContent = `${count.toLocaleString()} characters`;
-  }
+      setProgress(
+        "ocr-progress-bar",
+        "ocr-status",
+        5,
+        "Loading OCR engine. First use may take longer..."
+      );
 
-  if (ocrResult) {
-    ocrResult.addEventListener("input", () => {
-      updateCharacterCount("ocr-result", "ocr-result-count");
-    });
-  }
+      const worker = await getOcrWorker();
 
-  // ------------------------------
-  // 5. CLIPBOARD HELPERS
-  // ------------------------------
+      setProgress(
+        "ocr-progress-bar",
+        "ocr-status",
+        10,
+        "Reading text..."
+      );
+
+      const result = await worker.recognize(canvas);
+      const text = (result.data.text || "").trim();
+
+      ocrResult.value = text;
+      $("ocr-result-count").textContent =
+        `${text.length.toLocaleString()} characters`;
+
+      setProgress(
+        "ocr-progress-bar",
+        "ocr-status",
+        100,
+        "Finished."
+      );
+
+      if (text) {
+        showNotice(
+          "ocr-notice",
+          "Text extraction completed. Review the result and correct any mistakes.",
+          "success"
+        );
+      } else {
+        showNotice(
+          "ocr-notice",
+          "No text was detected. Try a clearer, sharper image with good lighting.",
+          "error"
+        );
+      }
+    } catch (error) {
+      console.error("OCR error:", error);
+
+      showNotice(
+        "ocr-notice",
+        error.message || "OCR failed. Check your internet connection and try again.",
+        "error"
+      );
+
+      setProgress(
+        "ocr-progress-bar",
+        "ocr-status",
+        0,
+        "OCR could not complete."
+      );
+    } finally {
+      state.processing = false;
+      $("extract-text-btn").disabled = !state.imageFile;
+    }
+  });
+
+  // --------------------------------------------------
+  // 5. TEXT DOWNLOAD AND COPY
+  // --------------------------------------------------
 
   async function copyText(text, noticeId) {
     if (!text.trim()) {
@@ -274,11 +431,12 @@ document.addEventListener("DOMContentLoaded", () => {
     try {
       await navigator.clipboard.writeText(text);
       showNotice(noticeId, "Text copied successfully.", "success");
-    } catch (error) {
+    } catch (_) {
       const temporary = document.createElement("textarea");
       temporary.value = text;
       temporary.style.position = "fixed";
       temporary.style.opacity = "0";
+
       document.body.appendChild(temporary);
       temporary.select();
 
@@ -292,28 +450,17 @@ document.addEventListener("DOMContentLoaded", () => {
 
       temporary.remove();
 
-      if (copied) {
-        showNotice(noticeId, "Text copied successfully.", "success");
-      } else {
-        showNotice(
-          noticeId,
-          "Copy was blocked by your browser. Select the text and copy it manually.",
-          "error"
-        );
-      }
+      showNotice(
+        noticeId,
+        copied
+          ? "Text copied successfully."
+          : "Copy blocked by browser. Select the text and copy it manually.",
+        copied ? "success" : "error"
+      );
     }
   }
 
-  function downloadText(text, filename, noticeId) {
-    if (!text.trim()) {
-      showNotice(noticeId, "There is no text to download.", "error");
-      return;
-    }
-
-    const blob = new Blob(["\uFEFF", text], {
-      type: "text/plain;charset=utf-8"
-    });
-
+  function downloadBlob(blob, filename) {
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
 
@@ -323,214 +470,464 @@ document.addEventListener("DOMContentLoaded", () => {
     link.click();
     link.remove();
 
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-
-    showNotice(noticeId, "Your text file has been downloaded.", "success");
+    setTimeout(() => URL.revokeObjectURL(url), 1500);
   }
 
-  // ------------------------------
-  // 6. OCR BUTTON
-  // Full OCR processing is added in Part 3.
-  // ------------------------------
-
-  if (extractTextBtn) {
-    extractTextBtn.addEventListener("click", () => {
-      if (!state.imageFile) {
-        showNotice("ocr-notice", "Please upload an image first.", "error");
-        return;
-      }
-
-      showNotice(
-        "ocr-notice",
-        "Image loaded. The OCR processing engine will be connected in Part 3.",
-        ""
-      );
-    });
-  }
-
-  // ------------------------------
-  // 7. OCR RESULT BUTTONS
-  // ------------------------------
-
-  $("copy-ocr-btn")?.addEventListener("click", () => {
-    copyText(ocrResult?.value || "", "ocr-notice");
-  });
-
-  $("download-ocr-btn")?.addEventListener("click", () => {
-    downloadText(ocrResult?.value || "", "naol-extracted-text.txt", "ocr-notice");
-  });
-
-  $("send-to-translate-btn")?.addEventListener("click", () => {
-    const text = ocrResult?.value || "";
-
+  function downloadText(text, filename, noticeId) {
     if (!text.trim()) {
-      showNotice("ocr-notice", "Extract or enter some text first.", "error");
+      showNotice(noticeId, "There is no text to download.", "error");
       return;
     }
 
-    $("source-text").value = text;
-    showView("translate-view");
-    showNotice("translation-status", "Text copied from Image to Text. Choose the target language and translate.", "success");
+    downloadBlob(
+      new Blob(["\uFEFF", text], { type: "text/plain;charset=utf-8" }),
+      filename
+    );
+
+    showNotice(noticeId, "Text file downloaded.", "success");
+  }
+
+  $("copy-ocr-btn").addEventListener("click", () => {
+    copyText(ocrResult.value, "ocr-notice");
   });
 
-  // ------------------------------
-  // 8. PDF BUTTONS
-  // PDF processing is added in Part 3.
-  // ------------------------------
+  $("download-ocr-btn").addEventListener("click", () => {
+    downloadText(ocrResult.value, "naol-extracted-text.txt", "ocr-notice");
+  });
 
-  $("extract-pdf-btn")?.addEventListener("click", () => {
+  $("send-to-translate-btn").addEventListener("click", () => {
+    if (!ocrResult.value.trim()) {
+      showNotice("ocr-notice", "Extract or enter text first.", "error");
+      return;
+    }
+
+    $("source-text").value = ocrResult.value;
+    showView("translate-view");
     showNotice(
-      "pdf-notice",
-      "PDF processing engine will be connected in Part 3.",
-      ""
+      "translation-status",
+      "Text transferred. Choose the target language and translate.",
+      "success"
     );
   });
 
-  $("clear-pdf-btn")?.addEventListener("click", () => {
-    if ($("pdf-input")) $("pdf-input").value = "";
-    if ($("pdf-result")) $("pdf-result").value = "";
-    if ($("pdf-status")) $("pdf-status").textContent = "Choose a PDF to begin.";
-    if ($("pdf-progress-bar")) $("pdf-progress-bar").style.width = "0%";
+  // --------------------------------------------------
+  // 6. PDF TEXT EXTRACTION
+  // --------------------------------------------------
+
+  if (window.pdfjsLib) {
+    pdfjsLib.GlobalWorkerOptions.workerSrc =
+      "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+  }
+
+  $("extract-pdf-btn").addEventListener("click", async () => {
+    const file = $("pdf-input").files?.[0];
+
+    if (!file) {
+      showNotice("pdf-notice", "Please choose a PDF file first.", "error");
+      return;
+    }
+
+    if (!window.pdfjsLib) {
+      showNotice(
+        "pdf-notice",
+        "PDF library did not load. Check your internet connection.",
+        "error"
+      );
+      return;
+    }
+
+    const button = $("extract-pdf-btn");
+    button.disabled = true;
+
+    $("pdf-result").value = "";
+    hideNotice("pdf-notice");
+
+    let pdfDocument = null;
+
+    try {
+      const bytes = await file.arrayBuffer();
+
+      pdfDocument = await pdfjsLib.getDocument({
+        data: new Uint8Array(bytes)
+      }).promise;
+
+      let fullText = "";
+
+      for (let pageNumber = 1; pageNumber <= pdfDocument.numPages; pageNumber++) {
+        setProgress(
+          "pdf-progress-bar",
+          "pdf-status",
+          Math.round(((pageNumber - 1) / pdfDocument.numPages) * 100),
+          `Reading page ${pageNumber} of ${pdfDocument.numPages}...`
+        );
+
+        const page = await pdfDocument.getPage(pageNumber);
+        const content = await page.getTextContent();
+
+        const pageText = content.items
+          .map((item) => item.str || "")
+          .join(" ");
+
+        fullText += `\n--- Page ${pageNumber} ---\n${pageText}\n`;
+      }
+
+      $("pdf-result").value = fullText.trim();
+
+      setProgress(
+        "pdf-progress-bar",
+        "pdf-status",
+        100,
+        `Finished: ${pdfDocument.numPages} page(s).`
+      );
+
+      if (fullText.trim()) {
+        showNotice(
+          "pdf-notice",
+          "PDF text extracted successfully.",
+          "success"
+        );
+      } else {
+        showNotice(
+          "pdf-notice",
+          "No selectable text found. This PDF may contain scanned images; use OCR on its pages.",
+          "error"
+        );
+      }
+    } catch (error) {
+      console.error("PDF extraction error:", error);
+
+      showNotice(
+        "pdf-notice",
+        "Could not read this PDF. Try another PDF file.",
+        "error"
+      );
+
+      setProgress("pdf-progress-bar", "pdf-status", 0, "PDF extraction failed.");
+    } finally {
+      button.disabled = false;
+    }
+  });
+
+  $("clear-pdf-btn").addEventListener("click", () => {
+    $("pdf-input").value = "";
+    $("pdf-result").value = "";
+
+    setProgress(
+      "pdf-progress-bar",
+      "pdf-status",
+      0,
+      "Choose a PDF to begin."
+    );
 
     hideNotice("pdf-notice");
   });
 
-  $("copy-pdf-btn")?.addEventListener("click", () => {
-    copyText($("pdf-result")?.value || "", "pdf-notice");
+  $("copy-pdf-btn").addEventListener("click", () => {
+    copyText($("pdf-result").value, "pdf-notice");
   });
 
-  $("download-pdf-text-btn")?.addEventListener("click", () => {
-    downloadText($("pdf-result")?.value || "", "naol-pdf-text.txt", "pdf-notice");
+  $("download-pdf-text-btn").addEventListener("click", () => {
+    downloadText(
+      $("pdf-result").value,
+      "naol-pdf-text.txt",
+      "pdf-notice"
+    );
   });
 
-  // ------------------------------
-  // 9. TRANSLATION CONTROLS
-  // Full translation logic is added in Part 3.
-  // ------------------------------
+  // --------------------------------------------------
+  // 7. TRANSLATION
+  // Uses Google's public translation endpoint.
+  // It requires internet access and may be rate-limited.
+  // --------------------------------------------------
 
-  $("swap-languages-btn")?.addEventListener("click", () => {
-    const sourceLanguage = $("source-language");
-    const targetLanguage = $("target-language");
+  $("swap-languages-btn").addEventListener("click", () => {
+    const sourceLang = $("source-language");
+    const targetLang = $("target-language");
     const sourceText = $("source-text");
     const translatedText = $("translated-text");
 
-    if (!sourceLanguage || !targetLanguage) return;
+    const oldLanguage = sourceLang.value;
+    sourceLang.value = targetLang.value;
+    targetLang.value = oldLanguage;
 
-    const previousLanguage = sourceLanguage.value;
-    sourceLanguage.value = targetLanguage.value;
-    targetLanguage.value = previousLanguage;
-
-    const previousText = sourceText.value;
+    const oldText = sourceText.value;
     sourceText.value = translatedText.value;
-    translatedText.value = previousText;
+    translatedText.value = oldText;
+
+    hideNotice("translation-status");
   });
 
-  $("clear-source-btn")?.addEventListener("click", () => {
+  $("clear-source-btn").addEventListener("click", () => {
     $("source-text").value = "";
     $("translated-text").value = "";
     hideNotice("translation-status");
   });
 
-  $("paste-source-btn")?.addEventListener("click", async () => {
+  $("paste-source-btn").addEventListener("click", async () => {
     try {
       $("source-text").value = await navigator.clipboard.readText();
-      showNotice("translation-status", "Text pasted successfully.", "success");
+      showNotice("translation-status", "Text pasted.", "success");
     } catch (_) {
       showNotice(
         "translation-status",
-        "Your browser blocked clipboard access. Paste your text manually.",
+        "Clipboard access was blocked. Paste the text manually.",
         "error"
       );
     }
   });
 
-  $("translate-btn")?.addEventListener("click", () => {
-    showNotice(
-      "translation-status",
-      "Translation engine will be connected in Part 3.",
-      ""
-    );
+  $("copy-translation-btn").addEventListener("click", () => {
+    copyText($("translated-text").value, "translation-status");
   });
 
-  $("copy-translation-btn")?.addEventListener("click", () => {
-    copyText($("translated-text")?.value || "", "translation-status");
-  });
+  $("translate-btn").addEventListener("click", async () => {
+    if (state.translating) return;
 
-  $("use-translation-btn")?.addEventListener("click", () => {
-    const translated = $("translated-text")?.value || "";
+    const text = $("source-text").value.trim();
+    const source = $("source-language").value;
+    const target = $("target-language").value;
 
-    if (!translated.trim()) {
-      showNotice("translation-status", "Translate some text first.", "error");
+    if (!text) {
+      showNotice("translation-status", "Enter text to translate.", "error");
       return;
     }
 
-    $("handwriting-input").value = translated;
-    showView("handwriting-view");
-    renderHandwriting();
+    if (source === target) {
+      $("translated-text").value = text;
+      showNotice(
+        "translation-status",
+        "Source and target languages are the same.",
+        "success"
+      );
+      return;
+    }
+
+    state.translating = true;
+    $("translate-btn").disabled = true;
+    $("translate-btn").textContent = "Translating...";
+
+    try {
+      const endpoint = new URL(
+        "https://translate.googleapis.com/translate_a/single"
+      );
+
+      endpoint.searchParams.set("client", "gtx");
+      endpoint.searchParams.set("sl", source);
+      endpoint.searchParams.set("tl", target);
+      endpoint.searchParams.set("dt", "t");
+      endpoint.searchParams.set("q", text);
+
+      const response = await fetch(endpoint.toString());
+
+      if (!response.ok) {
+        throw new Error("Translation service returned an error.");
+      }
+
+      const data = await response.json();
+
+      const translated = Array.isArray(data[0])
+        ? data[0].map((part) => part?.[0] || "").join("")
+        : "";
+
+      if (!translated.trim()) {
+        throw new Error("The translation service returned no text.");
+      }
+
+      $("translated-text").value = translated;
+
+      showNotice(
+        "translation-status",
+        "Translation completed. Please review the result for accuracy.",
+        "success"
+      );
+    } catch (error) {
+      console.error("Translation error:", error);
+
+      showNotice(
+        "translation-status",
+        "Translation failed. Check your internet connection and try again. This public service may temporarily limit requests.",
+        "error"
+      );
+    } finally {
+      state.translating = false;
+      $("translate-btn").disabled = false;
+      $("translate-btn").textContent = "Translate";
+    }
   });
 
-  // ------------------------------
-  // 10. HANDWRITING PREVIEW
-  // ------------------------------
+  $("use-translation-btn").addEventListener("click", () => {
+    const text = $("translated-text").value;
+
+    if (!text.trim()) {
+      showNotice("translation-status", "Translate text first.", "error");
+      return;
+    }
+
+    $("handwriting-input").value = text;
+    renderHandwriting();
+    showView("handwriting-view");
+  });
+
+  // --------------------------------------------------
+  // 8. HANDWRITING PREVIEW
+  // --------------------------------------------------
 
   function renderHandwriting() {
     const input = $("handwriting-input");
     const preview = $("handwriting-preview");
-    const fontSelect = $("handwriting-font");
-    const sizeSelect = $("handwriting-size");
-    const watermarkInput = $("handwriting-watermark");
 
-    if (!input || !preview) return;
+    preview.textContent =
+      input.value || "Your handwriting preview will appear here.";
 
-    const text = input.value.trim();
+    const font = $("handwriting-font").value;
+    const size = Number($("handwriting-size").value) || 28;
 
-    preview.textContent = text || "Your handwriting preview will appear here.";
+    preview.style.fontFamily =
+      font === "Caveat" ? "'Caveat', cursive" : font;
 
-    preview.style.fontFamily = fontSelect?.value === "Caveat"
-      ? "Caveat, cursive"
-      : fontSelect?.value || "Caveat, cursive";
+    preview.style.fontSize = `${size}px`;
 
-    preview.style.fontSize = `${Number(sizeSelect?.value || 28)}px`;
-
-    const watermark = watermarkInput?.value.trim();
-
-    preview.style.backgroundImage = watermark
-      ? "repeating-linear-gradient(0deg, transparent, transparent 39px, rgba(70,90,130,.12) 40px)"
-      : "none";
+    preview.style.backgroundImage =
+      "repeating-linear-gradient(0deg, transparent, transparent 39px, rgba(70,90,130,.12) 40px)";
   }
 
-  $("render-handwriting-btn")?.addEventListener("click", () => {
+  $("render-handwriting-btn").addEventListener("click", () => {
     renderHandwriting();
     showNotice("handwriting-notice", "Preview updated.", "success");
   });
 
-  $("handwriting-input")?.addEventListener("input", renderHandwriting);
-  $("handwriting-font")?.addEventListener("change", renderHandwriting);
-  $("handwriting-size")?.addEventListener("change", renderHandwriting);
+  $("handwriting-input").addEventListener("input", renderHandwriting);
+  $("handwriting-font").addEventListener("change", renderHandwriting);
+  $("handwriting-size").addEventListener("change", renderHandwriting);
 
-  // ------------------------------
-  // 11. EXPORT PLACEHOLDERS
-  // Full export logic is added in Part 3.
-  // ------------------------------
+  // --------------------------------------------------
+  // 9. HANDWRITING EXPORT
+  // --------------------------------------------------
 
-  function exportNotReady() {
-    showNotice(
-      "handwriting-notice",
-      "Export tools will be activated in Part 3.",
-      ""
-    );
+  async function createHandwritingCanvas() {
+    if (!window.html2canvas) {
+      throw new Error("Image export library did not load.");
+    }
+
+    renderHandwriting();
+
+    const preview = $("handwriting-preview");
+
+    await document.fonts.ready;
+
+    return html2canvas(preview, {
+      scale: 2,
+      backgroundColor: "#fffdf6",
+      useCORS: true,
+      logging: false
+    });
   }
 
-  $("download-handwriting-png-btn")?.addEventListener("click", exportNotReady);
-  $("download-handwriting-jpg-btn")?.addEventListener("click", exportNotReady);
-  $("download-handwriting-pdf-btn")?.addEventListener("click", exportNotReady);
+  async function exportHandwriting(format) {
+    try {
+      showNotice("handwriting-notice", "Preparing your download...", "");
 
-  // ------------------------------
-  // 12. INITIAL STATE
-  // ------------------------------
+      const canvas = await createHandwritingCanvas();
+
+      if (format === "png") {
+        canvas.toBlob((blob) => {
+          if (!blob) {
+            showNotice("handwriting-notice", "Could not create PNG.", "error");
+            return;
+          }
+
+          downloadBlob(blob, "naol-handwriting.png");
+
+          showNotice(
+            "handwriting-notice",
+            "PNG downloaded successfully.",
+            "success"
+          );
+        }, "image/png");
+
+        return;
+      }
+
+      if (format === "jpg") {
+        canvas.toBlob((blob) => {
+          if (!blob) {
+            showNotice("handwriting-notice", "Could not create JPG.", "error");
+            return;
+          }
+
+          downloadBlob(blob, "naol-handwriting.jpg");
+
+          showNotice(
+            "handwriting-notice",
+            "JPG downloaded successfully.",
+            "success"
+          );
+        }, "image/jpeg", 0.95);
+
+        return;
+      }
+
+      if (format === "pdf") {
+        if (!window.jspdf?.jsPDF) {
+          throw new Error("PDF export library did not load.");
+        }
+
+        const { jsPDF } = window.jspdf;
+        const imageData = canvas.toDataURL("image/png");
+
+        const pdf = new jsPDF({
+          orientation: canvas.width > canvas.height ? "landscape" : "portrait",
+          unit: "px",
+          format: [canvas.width, canvas.height]
+        });
+
+        pdf.addImage(
+          imageData,
+          "PNG",
+          0,
+          0,
+          canvas.width,
+          canvas.height
+        );
+
+        pdf.save("naol-handwriting.pdf");
+
+        showNotice(
+          "handwriting-notice",
+          "PDF downloaded successfully.",
+          "success"
+        );
+      }
+    } catch (error) {
+      console.error("Handwriting export error:", error);
+
+      showNotice(
+        "handwriting-notice",
+        error.message || "Export failed. Please try again.",
+        "error"
+      );
+    }
+  }
+
+  $("download-handwriting-png-btn").addEventListener("click", () => {
+    exportHandwriting("png");
+  });
+
+  $("download-handwriting-jpg-btn").addEventListener("click", () => {
+    exportHandwriting("jpg");
+  });
+
+  $("download-handwriting-pdf-btn").addEventListener("click", () => {
+    exportHandwriting("pdf");
+  });
+
+  // --------------------------------------------------
+  // 10. INITIAL STATE
+  // --------------------------------------------------
 
   showView("ocr-view");
+  resetImage();
   renderHandwriting();
 
-  console.log("Naol Converter Part 2 loaded.");
+  console.log("Naol Converter loaded successfully.");
 });
